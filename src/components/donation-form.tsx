@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, LoaderCircle, MessageCircle, Phone, Save, Search, X } from "lucide-react";
 import { getCountries, getCountryCallingCode, type Country } from "react-phone-number-input";
 import flags from "react-phone-number-input/flags";
@@ -32,10 +32,11 @@ type FormState = {
   destinationCountryId: string;
   destinationRegionId: string;
   partnerId: string;
-  unitCount: number;
+  unitCount: number | "";
   unitType: string;
-  unitPrice: number;
-  foreignAmount: number;
+  unitPrice: number | "";
+  amount: number | "";
+  foreignAmount: number | "";
   proxyOwner: string;
   address: string;
   specialCondition: boolean;
@@ -46,6 +47,8 @@ type FormState = {
   currencySms: boolean;
   description: string;
   receiptDate: string;
+  receiptNo: string;
+  currencyCode: string;
 };
 
 const initialState = (definitions: GeneralDonationDefinition[] = [], initialTypeCode = "", initialPaymentMethodCode = ""): FormState => ({
@@ -65,8 +68,9 @@ const initialState = (definitions: GeneralDonationDefinition[] = [], initialType
   partnerId: "",
   unitCount: 1,
   unitType: definitions.find((item) => item.type === "UNIT_TYPE")?.name ?? "",
-  unitPrice: 0,
-  foreignAmount: 0,
+  unitPrice: "",
+  amount: "",
+  foreignAmount: "",
   proxyOwner: "",
   address: "",
   specialCondition: false,
@@ -77,6 +81,8 @@ const initialState = (definitions: GeneralDonationDefinition[] = [], initialType
   currencySms: false,
   description: "",
   receiptDate: new Date().toISOString().slice(0, 10),
+  receiptNo: "",
+  currencyCode: "TRY",
 });
 
 const fieldClass = "h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-800 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-50 disabled:bg-slate-100";
@@ -180,14 +186,15 @@ export function DonationForm({
   const byType = (type: string) => definitions.filter((item) => item.type === type);
   const originCities = byType("ORIGIN_CITY").filter((item) => !form.originCountryId || item.parentId === form.originCountryId);
   const originDistricts = byType("ORIGIN_DISTRICT").filter((item) => !form.originCityId || item.parentId === form.originCityId);
-  const partners = byType("PARTNER").filter((item) => !form.destinationCountryId || !item.parentId || item.parentId === form.destinationCountryId);
+  const selectedDonationType = byType("DONATION_TYPE").find((item) => item.name === form.type);
+  const generalDonationGroups = byType("GENERAL_DONATION_GROUP").filter((item) => item.parentId === selectedDonationType?.id);
+  const partners = byType("PARTNER").filter((item) => item.parentId === form.destinationCountryId);
   const regions = byType("DESTINATION_REGION").filter((item) =>
     !form.destinationCountryId ||
     !item.parentId ||
     item.parentId === form.destinationCountryId ||
     item.parentId === form.partnerId
   );
-  const total = useMemo(() => Number((form.unitCount * form.unitPrice).toFixed(2)), [form.unitCount, form.unitPrice]);
   const selected = (id: string) => definitions.find((item) => item.id === id);
 
   function update<K extends keyof FormState>(field: K, value: FormState[K]) {
@@ -195,20 +202,34 @@ export function DonationForm({
       if (field === "originCountryId") return { ...current, originCountryId: value as string, originCityId: "", originDistrictId: "" };
       if (field === "originCityId") return { ...current, originCityId: value as string, originDistrictId: "" };
       if (field === "destinationCountryId") return { ...current, destinationCountryId: value as string, partnerId: "", destinationRegionId: "" };
-      if (field === "partnerId") return { ...current, partnerId: value as string, destinationRegionId: "" };
+      if (field === "partnerId") {
+        const partnerId = value as string;
+        const selectedRegion = definitions.find((item) => item.id === current.destinationRegionId);
+        const regionStillValid = !current.destinationRegionId
+          || selectedRegion?.parentId === current.destinationCountryId
+          || selectedRegion?.parentId === partnerId;
+        return { ...current, partnerId, destinationRegionId: regionStillValid ? current.destinationRegionId : "" };
+      }
+      if (field === "type") return { ...current, type: value as string, groupId: "" };
       return { ...current, [field]: value };
     });
+  }
+
+  function changePhoneCountry(country: Country) {
+    setPhoneCountry(country);
+    const originCountry = definitions.find((item) => item.type === "ORIGIN_COUNTRY" && item.code === country);
+    if (originCountry) update("originCountryId", originCountry.id);
   }
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
     setSuccess("");
-    if (!form.firstName.trim() || !form.lastName.trim() || !form.phone.trim()) {
-      setError("Telefon, ad ve soyad alanları zorunludur.");
+    if (!form.firstName.trim() || !form.lastName.trim() || !form.phone.trim() || !form.receiptNo.trim()) {
+      setError("Telefon, ad, soyad ve makbuz numarası alanları zorunludur.");
       return;
     }
-    if (!form.type || !form.paymentMethod || total <= 0) {
+    if (!form.type || !form.paymentMethod || Number(form.amount) <= 0 || Number(form.unitCount) < 1) {
       setError("Bağış türü, ödeme yöntemi ve sıfırdan büyük tutar zorunludur.");
       return;
     }
@@ -232,11 +253,11 @@ export function DonationForm({
           destinationRegionId: form.destinationRegionId || null,
           partnerId: form.partnerId || null,
           paymentMethod: form.paymentMethod,
-          quantity: form.unitCount,
+          quantity: Number(form.unitCount),
           unitType: form.unitType || null,
-          unitPrice: form.unitPrice,
-          amount: total,
-          foreignAmount: form.foreignAmount,
+          unitPrice: form.unitPrice === "" ? null : Number(form.unitPrice),
+          amount: Number(form.amount),
+          foreignAmount: form.foreignAmount === "" ? null : Number(form.foreignAmount),
           proxyOwner: form.proxyOwner || null,
           address: form.address || null,
           specialCondition: form.specialCondition,
@@ -247,6 +268,8 @@ export function DonationForm({
           currencySms: form.currencySms,
           description: form.description,
           receiptDate: form.receiptDate,
+          receiptNo: form.receiptNo,
+          currency: form.currencyCode,
           idempotencyKey: crypto.randomUUID(),
         }),
       });
@@ -277,9 +300,9 @@ export function DonationForm({
             <FormSelect label="Yıl" value={String(new Date(form.receiptDate).getFullYear())} options={[{ value: "2026", label: "2026" }, { value: "2025", label: "2025" }]} disabled />
             <FormSelect label="Ay" value={String(new Date(form.receiptDate).getMonth() + 1)} options={["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"].map((label, index) => ({ value: String(index + 1), label }))} disabled />
             <FormField label="Tarih"><Input type="date" value={form.receiptDate} onChange={(event) => update("receiptDate", event.target.value)} className="h-10" /></FormField>
-            <FormField label="Makbuz No"><Input value="Otomatik" readOnly className="h-10 bg-slate-50" /></FormField>
+            <FormField label="Makbuz No" required><Input required value={form.receiptNo} onChange={(event) => update("receiptNo", event.target.value)} placeholder="Makbuz numarasını girin" className="h-10" /></FormField>
 
-            <FormField label="Telefon" required><InternationalPhoneInput country={phoneCountry} onCountryChange={setPhoneCountry} value={form.phone} onChange={(value) => update("phone", value)} donorFound={donorFound} /></FormField>
+            <FormField label="Telefon" required><InternationalPhoneInput country={phoneCountry} onCountryChange={changePhoneCountry} value={form.phone} onChange={(value) => update("phone", value)} donorFound={donorFound} /></FormField>
             <FormField label="Adı" required><Input value={form.firstName} onChange={(event) => update("firstName", event.target.value)} className="h-10" /></FormField>
             <FormField label="Soyadı" required><Input value={form.lastName} onChange={(event) => update("lastName", event.target.value)} className="h-10" /></FormField>
             <DynamicSelect label="Gelen Ülke" value={form.originCountryId} onChange={(value) => update("originCountryId", value)} items={byType("ORIGIN_COUNTRY")} />
@@ -289,18 +312,18 @@ export function DonationForm({
             <DynamicSelect label="Ödeme" value={form.paymentMethod} onChange={(value) => update("paymentMethod", value)} items={byType("PAYMENT_METHOD")} useCode required />
             <DynamicSelect label="Türü" value={form.type} onChange={(value) => update("type", value)} items={byType("DONATION_TYPE").filter((item) => item.code !== "KURBAN")} useName required />
 
-            <DynamicSelect label="Grubu" value={form.groupId} onChange={(value) => update("groupId", value)} items={byType("GENERAL_DONATION_GROUP")} />
+            <DynamicSelect label="Grubu" value={form.groupId} onChange={(value) => update("groupId", value)} items={generalDonationGroups} disabled={!selectedDonationType} required />
             <DynamicSelect label="Giden Ülke" value={form.destinationCountryId} onChange={(value) => update("destinationCountryId", value)} items={byType("DESTINATION_COUNTRY")} />
-            <DynamicSelect label="Giden Bölge (İl)" value={form.destinationRegionId} onChange={(value) => update("destinationRegionId", value)} items={regions} disabled={!form.destinationCountryId} />
             <DynamicSelect label="Partner" value={form.partnerId} onChange={(value) => update("partnerId", value)} items={partners} disabled={!form.destinationCountryId} />
+            <DynamicSelect label="Giden Bölge (İl)" value={form.destinationRegionId} onChange={(value) => update("destinationRegionId", value)} items={regions} disabled={!form.destinationCountryId} />
 
-            <FormField label="Birim Sayısı"><Input type="number" min="1" value={form.unitCount} onChange={(event) => update("unitCount", Number(event.target.value))} className="h-10 bg-cyan-50" /></FormField>
+            <FormField label="Birim Sayısı"><Input type="number" min="1" value={form.unitCount} onChange={(event) => update("unitCount", event.target.value === "" ? "" : Number(event.target.value))} className="h-10 bg-cyan-50" /></FormField>
             <DynamicSelect label="Birim Cinsi" value={form.unitType} onChange={(value) => update("unitType", value)} items={byType("UNIT_TYPE")} useName />
-            <FormField label="Birim Fiyatı"><Input type="number" min="0.01" step="0.01" value={form.unitPrice} onChange={(event) => update("unitPrice", Number(event.target.value))} className="h-10 bg-cyan-50" /></FormField>
-            <FormField label="Tutar"><Input value={total} readOnly className="h-10 bg-cyan-50 font-bold text-emerald-800" /></FormField>
+            <FormField label="Birim Fiyatı"><Input type="number" min="0.01" step="0.01" value={form.unitPrice} onChange={(event) => update("unitPrice", event.target.value === "" ? "" : Number(event.target.value))} className="h-10 bg-cyan-50" /></FormField>
+            <FormField label="Tutar" required><Input type="number" min="0.01" step="0.01" value={form.amount} onChange={(event) => update("amount", event.target.value === "" ? "" : Number(event.target.value))} className="h-10 bg-cyan-50 font-bold text-emerald-800" /></FormField>
 
-            <FormField label="Döviz"><Input type="number" min="0" step="0.01" value={form.foreignAmount} onChange={(event) => update("foreignAmount", Number(event.target.value))} className="h-10 bg-cyan-50" /></FormField>
-            <FormSelect label="Para Birimi" value="TRY" options={[{ value: "TRY", label: "TL" }]} disabled />
+            <FormField label="Döviz"><Input type="number" min="0" step="0.01" value={form.foreignAmount} onChange={(event) => update("foreignAmount", event.target.value === "" ? "" : Number(event.target.value))} className="h-10 bg-cyan-50" /></FormField>
+            <FormSelect label="Para Birimi" value={form.currencyCode} onChange={(value) => update("currencyCode", value)} options={byType("CURRENCY").map((item) => ({ value: item.code, label: item.code === "TRY" ? "TL" : item.code === "USD" ? "$" : item.code === "EUR" ? "€" : item.code === "GBP" ? "Sterlin" : item.name }))} />
             <FormField label="Vekâlet Sahibi"><Input value={form.proxyOwner} onChange={(event) => update("proxyOwner", event.target.value)} className="h-10" /></FormField>
             <div className="grid gap-2">
               <CheckField label="Özel Şart" checked={form.specialCondition} onChange={(value) => update("specialCondition", value)} />

@@ -57,6 +57,7 @@ export const sacrificeDonationInputSchema = z.object({
   foreignAmount: z.coerce.number().nonnegative().multipleOf(0.01).nullable().optional(),
   currencyId: z.string().cuid(),
   paymentMethodId: z.string().cuid(),
+  receiptNumber: z.string().trim().min(1).max(100),
   receiptDate: z.coerce.date(),
   description: z.string().trim().max(1000).nullable().optional(),
   messageTarget: z.enum(["DONOR", "CLOSE"]).default("DONOR"),

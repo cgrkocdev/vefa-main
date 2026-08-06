@@ -20,7 +20,7 @@ import { CowIcon } from "@/components/ui/cow-icon";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { PAYMENT_METHODS, SACRIFICE_KINDS, type SacrificeKind } from "@/lib/constants";
+import { PAYMENT_METHODS, type SacrificeKind } from "@/lib/constants";
 import { formatCurrency } from "@/lib/utils";
 import { SacrificeDonationForm } from "@/components/sacrifices/sacrifice-donation-form";
 
@@ -41,6 +41,7 @@ type Share = {
     lastName: string;
     phone: string;
     phoneCountry: string;
+    originCountry: string;
     city: string;
     district: string;
   } | null;
@@ -58,6 +59,7 @@ type Sacrifice = {
   partner: string;
   region: string;
   currency: string;
+  currencyCode: string;
   kind: SacrificeKind;
   sharePrice: number;
   status: "OPEN" | "COMPLETED" | "CANCELLED";
@@ -75,9 +77,12 @@ type ProjectRow = {
   lastName: string;
   phone: string;
   phoneCountry: string;
+  originCountry: string;
   city: string;
   district: string;
   date: string;
+  projectYear: string;
+  department: string;
   kind: SacrificeKind;
   donationType: string;
   group: string;
@@ -85,6 +90,7 @@ type ProjectRow = {
   partner: string;
   region: string;
   currency: string;
+  currencyCode: string;
   paymentMethod: string;
   amount: number;
   description: string;
@@ -100,7 +106,7 @@ type SortKey = keyof Pick<ProjectRow,
 >;
 
 type SortDirection = "asc" | "desc";
-type DefinitionOption = { id: string; code: string; name: string };
+type DefinitionOption = { id: string; code: string; name: string; parentId?: string | null };
 
 const selectClass =
   "h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-700 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-50";
@@ -212,15 +218,25 @@ function printDonationList(rows: ProjectRow[]) {
 export function SacrificeDonationProjects() {
   const [sacrifices, setSacrifices] = useState<Sacrifice[]>([]);
   const [destinationCountries, setDestinationCountries] = useState<DefinitionOption[]>([]);
+  const [departments, setDepartments] = useState<DefinitionOption[]>([]);
+  const [donationGroups, setDonationGroups] = useState<DefinitionOption[]>([]);
+  const [partners, setPartners] = useState<DefinitionOption[]>([]);
+  const [currencies, setCurrencies] = useState<DefinitionOption[]>([]);
+  const [originCountries, setOriginCountries] = useState<DefinitionOption[]>([]);
+  const [originCities, setOriginCities] = useState<DefinitionOption[]>([]);
+  const [destinationRegions, setDestinationRegions] = useState<DefinitionOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [deletingId, setDeletingId] = useState("");
-  const [kind, setKind] = useState("");
-  const [region, setRegion] = useState("");
+  const [department, setDepartment] = useState("");
+  const [group, setGroup] = useState("");
+  const [city, setCity] = useState("");
+  const [district, setDistrict] = useState("");
   const [country, setCountry] = useState("");
+  const [partner, setPartner] = useState("");
+  const [destinationRegion, setDestinationRegion] = useState("");
   const [payment, setPayment] = useState("");
-  const [status, setStatus] = useState("");
-  const [currency, setCurrency] = useState("TRY");
+  const [currency, setCurrency] = useState("");
   const [year, setYear] = useState("");
   const [month, setMonth] = useState("");
   const [query, setQuery] = useState("");
@@ -230,7 +246,7 @@ export function SacrificeDonationProjects() {
   });
   const [donationFormOpen, setDonationFormOpen] = useState(false);
   const [editingRow, setEditingRow] = useState<ProjectRow | null>(null);
-  const [applied, setApplied] = useState({ kind: "", region: "", country: "", payment: "", status: "" });
+  const [applied, setApplied] = useState({ department: "", group: "", city: "", district: "", country: "", partner: "", destinationRegion: "", payment: "", currency: "", year: "", month: "" });
 
   useEffect(() => {
     const query = new URLSearchParams(window.location.search);
@@ -266,11 +282,25 @@ export function SacrificeDonationProjects() {
       const data = (await response.json()) as {
         sacrifices?: Sacrifice[];
         destinationCountries?: DefinitionOption[];
+        departments?: DefinitionOption[];
+        donationGroups?: DefinitionOption[];
+        partners?: DefinitionOption[];
+        currencies?: DefinitionOption[];
+        originCountries?: DefinitionOption[];
+        originCities?: DefinitionOption[];
+        destinationRegions?: DefinitionOption[];
         message?: string;
       };
       if (!response.ok) throw new Error(data.message);
       setSacrifices(data.sacrifices ?? []);
       setDestinationCountries(data.destinationCountries ?? []);
+      setDepartments(data.departments ?? []);
+      setDonationGroups(data.donationGroups ?? []);
+      setPartners(data.partners ?? []);
+      setCurrencies(data.currencies ?? []);
+      setOriginCountries(data.originCountries ?? []);
+      setOriginCities(data.originCities ?? []);
+      setDestinationRegions(data.destinationRegions ?? []);
     } catch {
       setError("Kurban proje bilgileri yüklenemedi.");
     } finally {
@@ -283,11 +313,12 @@ export function SacrificeDonationProjects() {
     return () => window.clearTimeout(timer);
   }, [loadSacrifices]);
 
-  const regions = useMemo(
-    () => [...new Set(sacrifices.map((item) => item.region))].sort((a, b) => a.localeCompare(b, "tr")),
-    [sacrifices],
-  );
-
+  const selectedOriginCountryId = originCountries.find((item) => item.name === city)?.id ?? "";
+  const districts = selectedOriginCountryId ? originCities.filter((item) => item.parentId === selectedOriginCountryId) : originCities;
+  const selectedCountryId = destinationCountries.find((item) => item.name === country)?.id ?? "";
+  const countryPartners = selectedCountryId ? partners.filter((item) => item.parentId === selectedCountryId) : [];
+  const selectedPartnerId = partners.find((item) => item.name === partner)?.id ?? "";
+  const countryRegions = selectedCountryId ? destinationRegions.filter((item) => item.parentId === selectedCountryId || item.parentId === selectedPartnerId) : [];
   const rows = useMemo<ProjectRow[]>(
     () =>
       sacrifices.flatMap((sacrifice) =>
@@ -304,9 +335,12 @@ export function SacrificeDonationProjects() {
             lastName: share.donor?.lastName ?? "",
             phone: share.donor?.phone ?? "",
             phoneCountry: share.donor?.phoneCountry ?? "TR",
+            originCountry: share.donor?.originCountry ?? "",
             city: share.donor?.city ?? "",
             district: share.donor?.district ?? "",
             date: share.createdAt ?? "",
+            projectYear: sacrifice.year,
+            department: sacrifice.department,
             kind: sacrifice.kind,
             donationType: sacrifice.donationType,
             group: sacrifice.group,
@@ -314,6 +348,7 @@ export function SacrificeDonationProjects() {
             partner: sacrifice.partner,
             region: sacrifice.region,
             currency: sacrifice.currency,
+            currencyCode: sacrifice.currencyCode,
             paymentMethod: share.paymentMethod ?? "",
             amount: share.amount,
             description: share.description,
@@ -328,11 +363,17 @@ export function SacrificeDonationProjects() {
   const filteredRows = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase("tr");
     return rows.filter((row) => {
-      if (applied.kind && row.kind !== applied.kind) return false;
-      if (applied.region && row.region !== applied.region) return false;
+      if (applied.department && row.department !== applied.department) return false;
+      if (applied.group && row.group !== applied.group) return false;
+      if (applied.city && row.originCountry !== applied.city) return false;
+      if (applied.district && row.city !== applied.district) return false;
       if (applied.country && row.country !== applied.country) return false;
+      if (applied.partner && row.partner !== applied.partner) return false;
+      if (applied.destinationRegion && row.region !== applied.destinationRegion) return false;
       if (applied.payment && row.paymentMethod !== applied.payment) return false;
-      if (applied.status && row.status !== applied.status) return false;
+      if (applied.currency && row.currencyCode !== applied.currency) return false;
+      if (applied.year && row.projectYear !== applied.year) return false;
+      if (applied.month && (!row.date || new Date(row.date).getMonth() + 1 !== Number(applied.month))) return false;
       if (
         normalizedQuery &&
         !`${row.projectName} ${row.firstName} ${row.lastName} ${row.phone} ${row.projectNo} ${row.city} ${row.district} ${row.country} ${row.partner} ${row.region}`
@@ -366,20 +407,23 @@ export function SacrificeDonationProjects() {
   }
 
   function applyFilters() {
-    setApplied({ kind, region, country, payment, status });
+    setApplied({ department, group, city, district, country, partner, destinationRegion, payment, currency, year, month });
   }
 
   function resetFilters() {
-    setKind("");
-    setRegion("");
+    setDepartment("");
+    setGroup("");
+    setCity("");
+    setDistrict("");
     setCountry("");
+    setPartner("");
+    setDestinationRegion("");
     setPayment("");
-    setStatus("");
-    setCurrency("TRY");
+    setCurrency("");
     setYear("");
     setMonth("");
     setQuery("");
-    setApplied({ kind: "", region: "", country: "", payment: "", status: "" });
+    setApplied({ department: "", group: "", city: "", district: "", country: "", partner: "", destinationRegion: "", payment: "", currency: "", year: "", month: "" });
   }
 
   function exportCsv() {
@@ -481,9 +525,9 @@ export function SacrificeDonationProjects() {
           </div>
         </div>
         <div className="grid gap-4 p-5 sm:grid-cols-2 sm:p-6 lg:grid-cols-3 xl:grid-cols-5">
-          <FilterSelect label="Bölüm" value={kind} onChange={setKind}>
+          <FilterSelect label="Bölüm" value={department} onChange={setDepartment}>
             <option value="">Tüm bölümler</option>
-            {SACRIFICE_KINDS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+            {departments.map((item) => <option key={item.id} value={item.name}>{item.name}</option>)}
           </FilterSelect>
           <FilterSelect label="Yıl" value={year} onChange={setYear}>
             <option value="">Tüm yıllar</option>
@@ -493,33 +537,40 @@ export function SacrificeDonationProjects() {
             <option value="">Tüm aylar</option>
             {["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"].map((item, index) => <option key={item} value={index + 1}>{item}</option>)}
           </FilterSelect>
-          <FilterSelect label="Bağış cinsi" value={kind} onChange={setKind}>
-            <option value="">Tüm kurban türleri</option>
-            {SACRIFICE_KINDS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+          <FilterSelect label="Bağış cinsi" value="Kurban" onChange={() => undefined}>
+            <option value="Kurban">Kurban</option>
           </FilterSelect>
-          <FilterSelect label="Bağış grubu" value={status} onChange={setStatus}>
-            <option value="">Tüm durumlar</option>
-            <option value="FILLED">Tamamlanan</option>
-            <option value="PENDING">Bekleyen</option>
+          <FilterSelect label="Bağış grubu" value={group} onChange={setGroup}>
+            <option value="">Tüm gruplar</option>
+            {donationGroups.map((item) => <option key={item.id} value={item.name}>{item.name}</option>)}
           </FilterSelect>
-          <FilterSelect label="Gelen il / ilçe" value={region} onChange={setRegion}>
-            <option value="">Tüm bölgeler</option>
-            {regions.map((item) => <option key={item}>{item}</option>)}
+          <FilterSelect label="Gelen il" value={city} onChange={(value) => { setCity(value); setDistrict(""); }}>
+            <option value="">Tüm iller</option>
+            {originCountries.map((item) => <option key={item.id} value={item.name}>{item.name}</option>)}
+          </FilterSelect>
+          <FilterSelect label="Gelen ilçe" value={district} onChange={setDistrict}>
+            <option value="">Tüm ilçeler</option>
+            {districts.map((item) => <option key={item.id} value={item.name}>{item.name}</option>)}
           </FilterSelect>
           <FilterSelect label="Ödeme şekli" value={payment} onChange={setPayment}>
             <option value="">Tüm ödeme şekilleri</option>
             {PAYMENT_METHODS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
           </FilterSelect>
           <FilterSelect label="Para birimi" value={currency} onChange={setCurrency}>
-            <option value="TRY">Türk Lirası (₺)</option>
+            <option value="">Tüm para birimleri</option>
+            {["USD", "EUR", "TRY", "GBP"].map((code) => currencies.find((item) => item.code === code)).filter((item): item is DefinitionOption => Boolean(item)).map((item) => <option key={item.id} value={item.code}>{item.code === "USD" ? "$" : item.code === "EUR" ? "EURO" : item.code === "TRY" ? "TL" : "STERLİN"}</option>)}
           </FilterSelect>
-          <FilterSelect label="Giden ülke" value={country} onChange={setCountry}>
+          <FilterSelect label="Giden ülke" value={country} onChange={(value) => { setCountry(value); setPartner(""); setDestinationRegion(""); }}>
             <option value="">Tüm ülkeler</option>
             {destinationCountries.map((item) => <option key={item.id} value={item.name}>{item.name}</option>)}
           </FilterSelect>
-          <FilterSelect label="Partner" value="" onChange={() => undefined}>
+          <FilterSelect label="Partner" value={partner} onChange={(value) => { setPartner(value); setDestinationRegion(""); }}>
             <option value="">Tüm partnerler</option>
-            <option>Yedirenk</option>
+            {countryPartners.map((item) => <option key={item.id} value={item.name}>{item.name}</option>)}
+          </FilterSelect>
+          <FilterSelect label="Giden bölge" value={destinationRegion} onChange={setDestinationRegion}>
+            <option value="">Tüm bölgeler</option>
+            {countryRegions.map((item) => <option key={item.id} value={item.name}>{item.name}</option>)}
           </FilterSelect>
           <div className="flex gap-2 sm:col-span-2 lg:col-span-3 xl:col-span-5 xl:justify-center">
             <Button type="button" variant="success" className="min-w-36" onClick={applyFilters}><Search className="size-4" /> Sorgula</Button>
@@ -599,7 +650,7 @@ export function SacrificeDonationProjects() {
                     <td className="px-4 py-3">{row.city || "—"}</td>
                     <td className="px-4 py-3">{row.district || "—"}</td>
                     <td className="whitespace-nowrap px-4 py-3">{row.date ? new Intl.DateTimeFormat("tr-TR").format(new Date(row.date)) : "—"}</td>
-                    <td className="px-4 py-3">{row.donationType || SACRIFICE_KINDS.find((item) => item.value === row.kind)?.label}</td>
+                    <td className="px-4 py-3">Kurban</td>
                     <td className="px-4 py-3">{row.group}</td>
                     <td className="px-4 py-3">{PAYMENT_METHODS.find((item) => item.value === row.paymentMethod)?.label ?? "—"}</td>
                     <td className="px-4 py-3 font-bold text-[#0b2b3c]">{formatCurrency(row.amount)}</td>

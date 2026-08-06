@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import { Prisma } from "@/generated/prisma/client";
 import { apiError } from "@/lib/server/api";
 import { ApiError, requestIp, requirePermission } from "@/lib/server/auth";
@@ -7,11 +6,6 @@ import { normalizePhone } from "@/lib/phone";
 import { sacrificeDonationInputSchema } from "@/lib/server/schemas";
 import { requireDefinitions } from "@/lib/server/definition-integrity";
 import { getSmsProvider } from "@/lib/sms";
-
-function receiptNumber(prefix: string) {
-  const date = new Date().toISOString().slice(0, 10).replaceAll("-", "");
-  return `${prefix}-${date}-${randomBytes(4).toString("hex").toLocaleUpperCase("tr-TR")}`;
-}
 
 export async function POST(request: Request) {
   try {
@@ -22,6 +16,8 @@ export async function POST(request: Request) {
     const result = await prisma.$transaction(async (tx) => {
       const duplicate = await tx.donation.findUnique({ where: { idempotencyKey: input.idempotencyKey }, include: { receipt: true } });
       if (duplicate) return { donation: duplicate, sms: null };
+      const duplicateReceipt = await tx.receipt.findUnique({ where: { number: input.receiptNumber } });
+      if (duplicateReceipt) throw new ApiError(409, "Bu makbuz numarası daha önce kullanılmış.");
       const project = await tx.project.findUnique({ where: { id: input.projectId } });
       if (!project || project.deletedAt || project.status !== "OPEN") throw new ApiError(409, "Proje bağış kabulüne açık değil.");
       await requireDefinitions(tx, [
@@ -77,7 +73,7 @@ export async function POST(request: Request) {
           messageTarget: input.messageTarget,
           idempotencyKey: input.idempotencyKey,
           payment: { create: { amount: new Prisma.Decimal(input.amount), currencyId: input.currencyId, methodId: input.paymentMethodId, status: "PAID" } },
-          receipt: { create: { number: receiptNumber(typeof settingValue.receiptPrefix === "string" ? settingValue.receiptPrefix : "BGS"), issuedAt: input.receiptDate } },
+          receipt: { create: { number: input.receiptNumber, issuedAt: input.receiptDate } },
         },
         include: { receipt: true },
       });

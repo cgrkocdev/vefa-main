@@ -23,17 +23,32 @@ export async function GET() {
       ...item.shares.map((share) => share.donation?.payment?.methodId ?? null),
     ].filter((value): value is string => Boolean(value))))];
     const definitions = await prisma.definition.findMany({ where: { id: { in: definitionIds } }, select: { id: true, code: true, name: true } });
-    const destinationCountries = await prisma.definition.findMany({
-      where: { type: "DESTINATION_COUNTRY", isActive: true, deletedAt: null },
-      select: { id: true, code: true, name: true },
+    const filterDefinitions = await prisma.definition.findMany({
+      where: { type: { in: ["DESTINATION_COUNTRY", "DESTINATION_REGION", "DEPARTMENT", "DONATION_GROUP", "PARTNER", "CURRENCY", "ORIGIN_COUNTRY", "ORIGIN_CITY"] }, isActive: true, deletedAt: null },
+      select: { id: true, code: true, name: true, type: true, parentId: true },
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
     });
+    const destinationCountries = filterDefinitions.filter((item) => item.type === "DESTINATION_COUNTRY");
+    const departments = filterDefinitions.filter((item) => item.type === "DEPARTMENT");
+    const donationGroups = filterDefinitions.filter((item) => item.type === "DONATION_GROUP" && ["ADAK", "AKIKA", "NAFILE", "VACIP"].includes(item.code));
+    const partners = filterDefinitions.filter((item) => item.type === "PARTNER");
+    const currencies = filterDefinitions.filter((item) => item.type === "CURRENCY" && ["USD", "EUR", "TRY", "GBP"].includes(item.code));
+    const originCountries = filterDefinitions.filter((item) => item.type === "ORIGIN_COUNTRY");
+    const originCities = filterDefinitions.filter((item) => item.type === "ORIGIN_CITY");
+    const destinationRegions = filterDefinitions.filter((item) => item.type === "DESTINATION_REGION");
     const definitionMap = new Map(definitions.map((item) => [item.id, item]));
     return Response.json({
       destinationCountries,
+      departments,
+      donationGroups,
+      partners,
+      currencies,
+      originCountries,
+      originCities,
+      destinationRegions,
       sacrifices: projects.map((project) => {
         const groupCode = definitionMap.get(project.groupId)?.code ?? "VACIP";
-        const kind = groupCode === "ADAK" || groupCode === "AKIKA" ? groupCode : "VACIP";
+        const kind = ["VACIP", "ADAK", "AKIKA", "NAFILE"].includes(groupCode) ? groupCode : "VACIP";
         return {
           id: project.id,
           typeId: project.typeId,
@@ -49,6 +64,7 @@ export async function GET() {
           partner: definitionMap.get(project.partnerId ?? "")?.name ?? "",
           region: definitionMap.get(project.destinationRegionId ?? "")?.name ?? "",
           currency: definitionMap.get(project.currencyId)?.name ?? "",
+          currencyCode: definitionMap.get(project.currencyId)?.code ?? "",
           kind,
           sharePrice: Number(project.sharePrice),
           status: project.status === "FULL" || project.status === "COMPLETED" ? "COMPLETED" : project.status === "CANCELLED" ? "CANCELLED" : "OPEN",
@@ -70,6 +86,7 @@ export async function GET() {
               lastName: share.donation.donor.lastName,
               phone: share.donation.donor.normalizedPhone,
               phoneCountry: share.donation.donor.phoneCountry,
+              originCountry: share.donation.donor.originCountry ?? "",
               city: share.donation.donor.originCity ?? "",
               district: share.donation.donor.originDistrict ?? "",
             } : null,

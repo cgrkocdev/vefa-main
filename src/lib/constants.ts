@@ -50,9 +50,10 @@ export const DONATION_TYPES = [
 ] as const;
 
 export const SACRIFICE_KINDS = [
-  { value: "VACIP", label: "Vacip Kurban" },
-  { value: "ADAK", label: "Adak Kurban" },
-  { value: "AKIKA", label: "Akika Kurban" },
+  { value: "VACIP", label: "Vacip" },
+  { value: "ADAK", label: "Adak" },
+  { value: "AKIKA", label: "Akika" },
+  { value: "NAFILE", label: "Nafile" },
 ] as const;
 
 export type SacrificeKind = (typeof SACRIFICE_KINDS)[number]["value"];

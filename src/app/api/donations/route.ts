@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { Prisma } from "@/generated/prisma/client";
 import { apiError } from "@/lib/server/api";
@@ -67,6 +66,8 @@ const createSchema = z.object({
   currencySms: z.boolean().default(false),
   sendSms: z.boolean().default(false),
   receiptDate: z.coerce.date().optional(),
+  receiptNo: z.string().trim().min(1, "Makbuz numarası zorunludur.").max(80),
+  currency: z.string().trim().min(1).max(20).default("TRY"),
   sacrificeId: z.string().optional(),
   quantity: z.coerce.number().int().min(1).max(7).default(1),
   sendWhatsapp: z.boolean().default(false),
@@ -103,7 +104,11 @@ export async function POST(request: Request) {
           },
         }),
         tx.definition.findFirst({
-          where: { type: "CURRENCY", code: "TRY", isActive: true },
+          where: {
+            type: "CURRENCY",
+            isActive: true,
+            OR: [{ code: input.currency }, { id: input.currency }],
+          },
         }),
       ]);
       if (!type || !method || !currency) {
@@ -112,7 +117,9 @@ export async function POST(request: Request) {
       if (type.code === "KURBAN") {
         throw new ApiError(422, "Kurban bağışları proje ve hisse bütünlüğü için Kurban Bağış formundan kaydedilmelidir.");
       }
-      await validateGeneralDonationDefinitions(tx, input);
+      await validateGeneralDonationDefinitions(tx, { ...input, typeId: type.id });
+      const existingReceipt = await tx.receipt.findUnique({ where: { number: input.receiptNo } });
+      if (existingReceipt) throw new ApiError(409, "Bu makbuz numarası daha önce kullanılmıştır. Farklı bir numara girin.");
 
       const normalizedPhone = normalizePhone(input.phone);
       const nameParts = input.donorName.trim().split(/\s+/);
@@ -142,7 +149,7 @@ export async function POST(request: Request) {
       const donations = [];
       const receipts: string[] = [];
       for (const index of [0]) {
-        const receipt = `BGS-${Date.now()}-${index + 1}-${randomBytes(2).toString("hex").toUpperCase()}`;
+        const receipt = input.receiptNo;
         const donation = await tx.donation.create({
           data: {
             donorId: donor.id,

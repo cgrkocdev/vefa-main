@@ -2,7 +2,8 @@ import "dotenv/config";
 import { hash } from "bcryptjs";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client";
-import { City, State } from "country-state-city";
+import { City, Country, State } from "country-state-city";
+import trCountryNames from "react-phone-number-input/locale/tr.json";
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) throw new Error("DATABASE_URL tanımlı değil.");
@@ -77,6 +78,9 @@ const definitions = [
   ["GENERAL_DONATION_GROUP", "TEMIZLIK_URUNLERI", "Temizlik Ürünleri", null],
   ["GENERAL_DONATION_GROUP", "UN", "Un", null],
   ["CURRENCY", "TRY", "Türk Lirası", "₺"],
+  ["CURRENCY", "USD", "Amerikan Doları", "$"],
+  ["CURRENCY", "EUR", "Euro", "€"],
+  ["CURRENCY", "GBP", "İngiliz Sterlini", "£"],
   ["PROJECT_STATUS", "OPEN", "Açık", null],
   ["SHARE_STATUS", "EMPTY", "Boş", null],
 ] as const;
@@ -90,6 +94,43 @@ const paymentMethodOrder = [
   "SAME_PAYMENT", "BANK", "CHECK", "PARTIAL_PAYMENT",
   "CASH", "ONLINE_DONATION", "PAYMENT_PENDING", "POS_DEVICE",
 ] as const;
+
+const inKindGroupCodes = [
+  "BATTANIYE", "BEBEK_MAMASI", "BEYAZ_ESYA", "COCUK_VE_HASTA_BEZI",
+  "ELMA", "GIDA_KOLISI", "GIYIM", "HIJYEN_PAKETI", "HURMA",
+  "KOMUR_YAKACAK", "MERMER", "ODUN", "PATATES", "SOBA",
+  "TEMIZLIK_URUNLERI", "UN",
+] as const;
+
+const generalDonationGroupMappings: Record<string, Array<{ code: string; name: string }>> = {
+  AYNI: inKindGroupCodes.map((code) => ({
+    code,
+    name: definitions.find(([type, definitionCode]) => type === "GENERAL_DONATION_GROUP" && definitionCode === code)?.[2] ?? code,
+  })),
+  BURS: [{ code: "BURS_STANDART", name: "Burs" }],
+  DOGAL_AFET: [{ code: "DOGAL_AFET_STANDART", name: "Doğal Afet" }],
+  FIDYE_FITRE_YEMIN_KEFARETI: [
+    { code: "FIDYE", name: "Fidye" },
+    { code: "FITRE", name: "Fitre" },
+    { code: "YEMIN_KEFARETI", name: "Yemin Kefareti" },
+  ],
+  GENEL_BAGIS: [{ code: "GENEL_BAGIS_STANDART", name: "Genel Bağış" }],
+  GIDA_KOLISI: [{ code: "GIDA_KOLISI_STANDART", name: "Gıda Kolisi" }],
+  IFTAR: [{ code: "IFTAR_STANDART", name: "İftar" }],
+  KARDES_AILE: [{ code: "KARDES_AILE_STANDART", name: "Kardeş Aile" }],
+  KUMBARA: [{ code: "KUMBARA_STANDART", name: "Kumbara" }],
+  KURAN: [{ code: "KURAN_STANDART", name: "Kur'an-ı Kerim" }],
+  PROMOSYON: [{ code: "PROMOSYON_STANDART", name: "Promosyon" }],
+  SOSYAL_HIZMET: [{ code: "SOSYAL_HIZMET_STANDART", name: "Sosyal Hizmet" }],
+  TOPLU_YEMEK: [{ code: "TOPLU_YEMEK_STANDART", name: "Toplu Yemek" }],
+  YETIM: [{ code: "YETIM_STANDART", name: "Yetim" }],
+  ZEKAT: [{ code: "ZEKAT_STANDART", name: "Zekat" }],
+};
+
+const defaultGeneralGroupCode = (typeCode: string, fallback = "") =>
+  typeCode === "AYNI" && fallback
+    ? fallback
+    : generalDonationGroupMappings[typeCode]?.[0]?.code ?? fallback;
 
 const demoPartners = [
   ["AF", "KABIL_UMUT", "Kabil Umut Yardımlaşma"],
@@ -149,6 +190,50 @@ async function main() {
       where: { type_code: { type, code } },
       update: { name, symbol, sortOrder, isActive: true },
       create: { type, code, name, symbol, sortOrder },
+    });
+  }
+
+  const generalDonationTypes = await prisma.definition.findMany({
+    where: { type: "DONATION_TYPE", code: { in: Object.keys(generalDonationGroupMappings) } },
+    select: { id: true, code: true },
+  });
+  const generalDonationTypeIds = new Map(generalDonationTypes.map((type) => [type.code, type.id]));
+  for (const [typeCode, groups] of Object.entries(generalDonationGroupMappings)) {
+    const parentId = generalDonationTypeIds.get(typeCode);
+    if (!parentId) throw new Error(`${typeCode} bağış türü bulunamadı.`);
+    for (const [index, group] of groups.entries()) {
+      await prisma.definition.upsert({
+        where: { type_code: { type: "GENERAL_DONATION_GROUP", code: group.code } },
+        update: { name: group.name, parentId, sortOrder: index + 1, isActive: true, deletedAt: null },
+        create: {
+          type: "GENERAL_DONATION_GROUP",
+          code: group.code,
+          name: group.name,
+          parentId,
+          sortOrder: index + 1,
+          isActive: true,
+        },
+      });
+    }
+  }
+
+  const originCountries = Country.getAllCountries()
+    .map((country) => ({
+      code: country.isoCode,
+      name: trCountryNames[country.isoCode as keyof typeof trCountryNames] ?? country.name,
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name, "tr"));
+  for (const [index, country] of originCountries.entries()) {
+    await prisma.definition.upsert({
+      where: { type_code: { type: "ORIGIN_COUNTRY", code: country.code } },
+      update: { name: country.name, sortOrder: index + 1, isActive: true, deletedAt: null },
+      create: {
+        type: "ORIGIN_COUNTRY",
+        code: country.code,
+        name: country.name,
+        sortOrder: index + 1,
+        isActive: true,
+      },
     });
   }
 
@@ -364,7 +449,11 @@ async function main() {
     { firstName: "Omar", lastName: "Haddad", phone: "+963940000109", phoneCountry: "SY", originCountry: "Suriye", originCity: "Şam", type: "FIDYE_FITRE_YEMIN_KEFARETI", group: "KOMUR_YAKACAK", destination: "SY", payment: "PAYMENT_PENDING", quantity: 1, unitPrice: 2800 },
     { firstName: "Asha", lastName: "Mtemi", phone: "+255710000110", phoneCountry: "TZ", originCountry: "Tanzanya", originCity: "Darüsselam", type: "TOPLU_YEMEK", group: "PATATES", destination: "TZ", payment: "POS_DEVICE", quantity: 8, unitPrice: 325 },
   ] as const;
-  const generalDefinitionCodes = [...new Set(generalDonationSeeds.flatMap((item) => [item.type, item.group, item.destination, item.payment]))];
+  const mappedGeneralGroupCodes = Object.values(generalDonationGroupMappings).flatMap((groups) => groups.map((group) => group.code));
+  const generalDefinitionCodes = [...new Set([
+    ...generalDonationSeeds.flatMap((item) => [item.type, defaultGeneralGroupCode(item.type, item.group), item.destination, item.payment]),
+    ...mappedGeneralGroupCodes,
+  ])];
   const generalDefinitions = await prisma.definition.findMany({
     where: { code: { in: generalDefinitionCodes }, isActive: true },
   });
@@ -406,7 +495,7 @@ async function main() {
     });
     const amount = item.quantity * item.unitPrice;
     const typeId = generalDefinitionId("DONATION_TYPE", item.type);
-    const groupId = generalDefinitionId("GENERAL_DONATION_GROUP", item.group);
+    const groupId = generalDefinitionId("GENERAL_DONATION_GROUP", defaultGeneralGroupCode(item.type, item.group));
     const destinationCountryId = generalDefinitionId("DESTINATION_COUNTRY", item.destination);
     const paymentMethodId = generalDefinitionId("PAYMENT_METHOD", item.payment);
     const receiptNumber = `GEN-2026-${String(index + 1).padStart(3, "0")}`;
@@ -451,7 +540,6 @@ async function main() {
   ] as const;
   const turkeyDestination = (await prisma.definition.findUniqueOrThrow({ where: { type_code: { type: "DESTINATION_COUNTRY", code: "TR" } } })).id;
   const generalType = generalDefinitionId("DONATION_TYPE", "GENEL_BAGIS");
-  const generalGroup = generalDefinitionId("GENERAL_DONATION_GROUP", "GIDA_KOLISI");
   for (const [index, item] of provinceStatisticSeeds.entries()) {
     const [firstName, lastName, phone, city, district, typeCode, paymentCode, amount] = item;
     const donor = await prisma.donor.upsert({
@@ -460,11 +548,12 @@ async function main() {
       create: { firstName, lastName, normalizedPhone: phone, phoneCountry: "TR", originCountry: "Türkiye", originCity: city, originDistrict: district },
     });
     const typeId = (await prisma.definition.findUnique({ where: { type_code: { type: "DONATION_TYPE", code: typeCode } } }))?.id ?? generalType;
+    const groupId = generalDefinitionId("GENERAL_DONATION_GROUP", defaultGeneralGroupCode(typeCode, "GIDA_KOLISI"));
     const paymentMethodId = (await prisma.definition.findUniqueOrThrow({ where: { type_code: { type: "PAYMENT_METHOD", code: paymentCode } } })).id;
     await prisma.donation.upsert({
       where: { idempotencyKey: `province-statistic-seed-${String(index + 1).padStart(3, "0")}` },
-      update: { donorId: donor.id, typeId, groupId: generalGroup, destinationCountryId: turkeyDestination, paymentMethodId, quantity: 1, unitType: "Adet", unitPrice: amount, amount, status: "COMPLETED" },
-      create: { donorId: donor.id, createdById: admin.id, typeId, groupId: generalGroup, destinationCountryId: turkeyDestination, quantity: 1, unitType: "Adet", unitPrice: amount, amount, currencyId: tryCurrency.id, paymentMethodId, description: `${city} / ${district} kaynaklı genel bağış`, idempotencyKey: `province-statistic-seed-${String(index + 1).padStart(3, "0")}`, payment: { create: { amount, currencyId: tryCurrency.id, methodId: paymentMethodId, status: "PAID" } }, receipt: { create: { number: `IL-2026-${String(index + 1).padStart(3, "0")}`, issuedAt: new Date(Date.UTC(2026, 6, 10 + index)) } } },
+      update: { donorId: donor.id, typeId, groupId, destinationCountryId: turkeyDestination, paymentMethodId, quantity: 1, unitType: "Adet", unitPrice: amount, amount, status: "COMPLETED" },
+      create: { donorId: donor.id, createdById: admin.id, typeId, groupId, destinationCountryId: turkeyDestination, quantity: 1, unitType: "Adet", unitPrice: amount, amount, currencyId: tryCurrency.id, paymentMethodId, description: `${city} / ${district} kaynaklı genel bağış`, idempotencyKey: `province-statistic-seed-${String(index + 1).padStart(3, "0")}`, payment: { create: { amount, currencyId: tryCurrency.id, methodId: paymentMethodId, status: "PAID" } }, receipt: { create: { number: `IL-2026-${String(index + 1).padStart(3, "0")}`, issuedAt: new Date(Date.UTC(2026, 6, 10 + index)) } } },
     });
   }
 
@@ -516,12 +605,13 @@ async function main() {
         const typeCode = internationalTypeCodes[(internationalIndex - 1) % internationalTypeCodes.length];
         const paymentCode = internationalPaymentCodes[(internationalIndex - 1) % internationalPaymentCodes.length];
         const typeId = (await prisma.definition.findUniqueOrThrow({ where: { type_code: { type: "DONATION_TYPE", code: typeCode } } })).id;
+        const groupId = generalDefinitionId("GENERAL_DONATION_GROUP", defaultGeneralGroupCode(typeCode, "GIDA_KOLISI"));
         const paymentMethodId = (await prisma.definition.findUniqueOrThrow({ where: { type_code: { type: "PAYMENT_METHOD", code: paymentCode } } })).id;
         const amount = 700 + internationalIndex * 85;
         await prisma.donation.upsert({
           where: { idempotencyKey: `international-province-seed-${String(internationalIndex).padStart(3, "0")}` },
-          update: { donorId: donor.id, typeId, groupId: generalGroup, destinationCountryId, paymentMethodId, quantity: 1, unitType: "Adet", unitPrice: amount, amount, status: "COMPLETED" },
-          create: { donorId: donor.id, createdById: admin.id, typeId, groupId: generalGroup, destinationCountryId, quantity: 1, unitType: "Adet", unitPrice: amount, amount, currencyId: tryCurrency.id, paymentMethodId, description: `${location.country} / ${city} / ${district} bağışı`, idempotencyKey: `international-province-seed-${String(internationalIndex).padStart(3, "0")}`, payment: { create: { amount, currencyId: tryCurrency.id, methodId: paymentMethodId, status: "PAID" } }, receipt: { create: { number: `ULKE-2026-${String(internationalIndex).padStart(3, "0")}`, issuedAt: new Date(Date.UTC(2026, 5 + (internationalIndex % 2), 1 + (internationalIndex % 27))) } } },
+          update: { donorId: donor.id, typeId, groupId, destinationCountryId, paymentMethodId, quantity: 1, unitType: "Adet", unitPrice: amount, amount, status: "COMPLETED" },
+          create: { donorId: donor.id, createdById: admin.id, typeId, groupId, destinationCountryId, quantity: 1, unitType: "Adet", unitPrice: amount, amount, currencyId: tryCurrency.id, paymentMethodId, description: `${location.country} / ${city} / ${district} bağışı`, idempotencyKey: `international-province-seed-${String(internationalIndex).padStart(3, "0")}`, payment: { create: { amount, currencyId: tryCurrency.id, methodId: paymentMethodId, status: "PAID" } }, receipt: { create: { number: `ULKE-2026-${String(internationalIndex).padStart(3, "0")}`, issuedAt: new Date(Date.UTC(2026, 5 + (internationalIndex % 2), 1 + (internationalIndex % 27))) } } },
         });
       }
     }

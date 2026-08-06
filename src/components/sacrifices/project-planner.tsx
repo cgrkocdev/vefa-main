@@ -488,8 +488,8 @@ function ProjectModal({
     ["Tür", "typeId", "DONATION_TYPE", project?.typeId],
     ["Bağış grubu", "groupId", "DONATION_GROUP", project?.groupId],
   ];
-  const availablePartners = byType("PARTNER").filter((item) => !item.parentId || item.parentId === countryId);
-  const availableRegions = byType("DESTINATION_REGION").filter((item) => !item.parentId || item.parentId === countryId || item.parentId === partnerId);
+  const availablePartners = byType("PARTNER").filter((item) => item.parentId === countryId);
+  const availableRegions = byType("DESTINATION_REGION").filter((item) => item.parentId === countryId || item.parentId === partnerId);
 
   return (
     <div className="fixed inset-0 z-[90] grid place-items-center bg-slate-950/45 p-4 backdrop-blur-sm">
@@ -511,7 +511,7 @@ function ProjectModal({
             <label key={name}><span className="mb-1.5 block text-xs font-semibold">{label}</span><DefinitionSelect definitions={definitions} name={name} type={type} defaultValue={value} required={!["partnerId", "destinationRegionId"].includes(name)} /></label>
           ))}
           <label><span className="mb-1.5 block text-xs font-semibold">Giden ülke</span><select name="destinationCountryId" required value={countryId} onChange={(event) => { setCountryId(event.target.value); setPartnerId(""); setRegionId(""); }} className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs"><option value="">Seçiniz</option>{byType("DESTINATION_COUNTRY").map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-          <label><span className="mb-1.5 block text-xs font-semibold">Partner</span><select name="partnerId" value={partnerId} onChange={(event) => { setPartnerId(event.target.value); setRegionId(""); }} className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs"><option value="">Seçiniz</option>{availablePartners.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+          <label><span className="mb-1.5 block text-xs font-semibold">Partner</span><select name="partnerId" value={partnerId} onChange={(event) => { const nextPartnerId = event.target.value; const selectedRegion = definitions.find((item) => item.id === regionId); setPartnerId(nextPartnerId); if (regionId && selectedRegion?.parentId !== countryId && selectedRegion?.parentId !== nextPartnerId) setRegionId(""); }} className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs"><option value="">Seçiniz</option>{availablePartners.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
           <label><span className="mb-1.5 block text-xs font-semibold">Giden bölge</span><select name="destinationRegionId" required value={regionId} onChange={(event) => setRegionId(event.target.value)} className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs"><option value="">Seçiniz</option>{availableRegions.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
           <label><span className="mb-1.5 block text-xs font-semibold">Proje numarası</span><Input value={project?.projectNumber ?? nextProjectNumber ?? "Yıl, bölüm, ülke ve bölge seçiniz"} readOnly className="h-10 bg-slate-50 font-semibold text-emerald-700" /><span className="mt-1 block text-[10px] text-emerald-700">Yıl, bölüm, giden ülke ve bölgeye göre otomatik belirlenir.</span></label>
           <label className="sm:col-span-2"><span className="mb-1.5 block text-xs font-semibold">Proje adı</span><Input name="name" required value={projectName} onChange={(event) => setProjectName(event.target.value)} className="h-10" /><span className="mt-1 block text-[10px] text-emerald-700">Giden ülke ve bölüm seçildiğinde otomatik oluşturulur; gerekirse düzenlenebilir.</span></label>

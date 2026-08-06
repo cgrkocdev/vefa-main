@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "vercel-build": "node scripts/recover-failed-production-migration.mjs && prisma migrate deploy && next build",
+    "vercel-build": "node scripts/recover-failed-production-migration.mjs && prisma migrate deploy && tsx scripts/sync-production-definitions.ts && next build",
     "postinstall": "prisma generate",
     "start": "next start",
     "lint": "eslint",

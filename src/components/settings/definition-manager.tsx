@@ -52,6 +52,8 @@ export function DefinitionManager() {
           ? "DESTINATION_COUNTRY"
         : type === "DESTINATION_REGION"
           ? "DESTINATION_COUNTRY"
+        : type === "GENERAL_DONATION_GROUP"
+          ? "DONATION_TYPE"
         : null;
 
   useEffect(() => { const timer = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(timer); }, [load]);

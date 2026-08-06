@@ -9,14 +9,17 @@ const updateSchema = z.object({
   firstName: z.string().trim().min(2).max(80),
   lastName: z.string().trim().min(1).max(80),
   phone: z.string().trim().min(7).max(30),
+  phoneCountry: z.string().length(2).optional(),
+  originCountry: z.string().trim().max(80).nullable().optional(),
   city: z.string().trim().max(80).nullable().optional(),
   district: z.string().trim().max(80).nullable().optional(),
   amount: z.coerce.number().positive().multipleOf(0.01),
   paymentMethod: z.string().trim().min(1),
-  sacrificeId: z.string().trim().min(1),
+  sacrificeId: z.string().trim().min(1).optional(),
   quantity: z.coerce.number().int().min(1).max(7),
   description: z.string().max(2000).nullable().optional(),
   date: z.iso.date().optional(),
+  receiptNumber: z.string().trim().min(1).max(100).optional(),
 });
 
 export async function PATCH(
@@ -31,7 +34,7 @@ export async function PATCH(
     const updated = await prisma.$transaction(async (tx) => {
       const donation = await tx.donation.findUnique({
         where: { id },
-        include: { donor: true, payment: true, share: true },
+        include: { donor: true, payment: true, receipt: true, share: true },
       });
       if (!donation || donation.status === "CANCELLED") {
         throw new ApiError(404, "Güncellenecek bağış kaydı bulunamadı.");
@@ -44,6 +47,10 @@ export async function PATCH(
         },
       });
       if (!paymentMethod) throw new ApiError(422, "Ödeme yöntemi tanımı bulunamadı.");
+      if (input.receiptNumber && input.receiptNumber !== donation.receipt?.number) {
+        const receiptOwner = await tx.receipt.findUnique({ where: { number: input.receiptNumber } });
+        if (receiptOwner) throw new ApiError(409, "Bu makbuz numarası daha önce kullanılmış.");
+      }
 
       const normalizedPhone = normalizePhone(input.phone);
       const phoneOwner = await tx.donor.findUnique({ where: { normalizedPhone } });
@@ -56,16 +63,19 @@ export async function PATCH(
           firstName: input.firstName,
           lastName: input.lastName,
           normalizedPhone,
+          originCountry: input.originCountry || null,
           originCity: input.city || null,
           originDistrict: input.district || null,
-          phoneCountry: normalizedPhone.startsWith("+90") ? "TR" : donation.donor.phoneCountry,
+          phoneCountry: input.phoneCountry ?? (normalizedPhone.startsWith("+90") ? "TR" : donation.donor.phoneCountry),
         },
       });
 
+      const targetProjectId = input.sacrificeId ?? donation.projectId;
       let targetShareId = donation.share?.id ?? null;
-      if (donation.projectId !== input.sacrificeId) {
+      if (donation.projectId !== targetProjectId) {
+        if (!targetProjectId) throw new ApiError(422, "Kurban bağışı için proje seçimi zorunludur.");
         const targetShare = await tx.share.findFirst({
-          where: { projectId: input.sacrificeId, status: "EMPTY" },
+          where: { projectId: targetProjectId, status: "EMPTY" },
           orderBy: { shareNumber: "asc" },
         });
         if (!targetShare) throw new ApiError(409, "Seçilen projede boş hisse bulunamadı.");
@@ -87,7 +97,7 @@ export async function PATCH(
         data: {
           amount: new Prisma.Decimal(input.amount),
           paymentMethodId: paymentMethod.id,
-          projectId: input.sacrificeId,
+          projectId: targetProjectId,
           quantity: input.quantity,
           description: input.description || null,
           createdAt: input.date ? new Date(`${input.date}T12:00:00.000Z`) : donation.createdAt,
@@ -102,14 +112,21 @@ export async function PATCH(
           },
         });
       }
-      if (donation.projectId && donation.projectId !== input.sacrificeId) {
+      if (input.receiptNumber) {
+        if (donation.receipt) {
+          await tx.receipt.update({ where: { donationId: id }, data: { number: input.receiptNumber, issuedAt: input.date ? new Date(`${input.date}T12:00:00.000Z`) : donation.receipt.issuedAt } });
+        } else {
+          await tx.receipt.create({ data: { donationId: id, number: input.receiptNumber, issuedAt: input.date ? new Date(`${input.date}T12:00:00.000Z`) : new Date() } });
+        }
+      }
+      if (donation.projectId && donation.projectId !== targetProjectId) {
         await tx.project.updateMany({
           where: { id: donation.projectId, status: "FULL" },
           data: { status: "OPEN" },
         });
       }
-      if (await tx.share.count({ where: { projectId: input.sacrificeId, status: "EMPTY" } }) === 0) {
-        await tx.project.update({ where: { id: input.sacrificeId }, data: { status: "FULL" } });
+      if (targetProjectId && await tx.share.count({ where: { projectId: targetProjectId, status: "EMPTY" } }) === 0) {
+        await tx.project.update({ where: { id: targetProjectId }, data: { status: "FULL" } });
       }
       await tx.auditLog.create({
         data: {
@@ -134,7 +151,7 @@ export async function PATCH(
             ...input,
             phone: normalizedPhone,
             paymentMethodId: paymentMethod.id,
-            projectId: input.sacrificeId,
+            projectId: targetProjectId,
             shareId: targetShareId,
           },
           ipAddress: await requestIp(),

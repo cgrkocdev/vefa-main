@@ -66,6 +66,7 @@ export async function validateProjectDefinitions(tx: Prisma.TransactionClient, i
 }
 
 export async function validateGeneralDonationDefinitions(tx: Prisma.TransactionClient, input: {
+  typeId: string;
   groupId?: string | null;
   destinationCountryId?: string | null;
   destinationRegionId?: string | null;
@@ -80,6 +81,13 @@ export async function validateGeneralDonationDefinitions(tx: Prisma.TransactionC
   if ((input.partnerId || input.destinationRegionId) && !input.destinationCountryId) {
     throw new ApiError(422, "Partner veya bölge seçildiğinde giden ülke de seçilmelidir.");
   }
-  requireParent(definitions.get(input.partnerId ?? ""), [input.destinationCountryId], "Partner");
-  requireParent(definitions.get(input.destinationRegionId ?? ""), [input.destinationCountryId, input.partnerId], "Giden bölge");
+  requireParent(definitions.get(input.groupId ?? ""), [input.typeId], "Bağış grubu");
+  const partner = definitions.get(input.partnerId ?? "");
+  if (partner && partner.parentId !== input.destinationCountryId) {
+    throw new ApiError(422, "Partner, seçilen giden ülkeye bağlı değildir.");
+  }
+  const region = definitions.get(input.destinationRegionId ?? "");
+  if (region && ![input.destinationCountryId, input.partnerId].includes(region.parentId)) {
+    throw new ApiError(422, "Giden bölge, seçilen ülke veya partnere bağlı değildir.");
+  }
 }

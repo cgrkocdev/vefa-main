@@ -216,7 +216,6 @@ export function AdvancedQueryReport() {
   const partners = byType("PARTNER").filter(
     (item) =>
       !filters.destinationCountryId ||
-      !item.parentId ||
       item.parentId === filters.destinationCountryId,
   );
   const update = (key: keyof Filters, value: string) =>

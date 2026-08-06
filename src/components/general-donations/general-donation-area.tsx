@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { LoaderCircle, Plus, RotateCcw, Search, Trash2 } from "lucide-react";
+import { LoaderCircle, Pencil, Plus, RotateCcw, Save, Search, Trash2, X } from "lucide-react";
 import { DonationForm, type GeneralDonationDefinition } from "@/components/donation-form";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -21,6 +21,7 @@ type GeneralDonation = {
   country: string;
   paymentMethod: string;
   amount: number;
+  currencyCode: string;
   receiptNo: string;
   orderStatus: boolean;
 };
@@ -54,10 +55,12 @@ export function GeneralDonationArea() {
   const [applied, setApplied] = useState<Filters>(emptyFilters);
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState("");
+  const [editingDonation, setEditingDonation] = useState<GeneralDonation | null>(null);
   const [error, setError] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [quickCreate, setQuickCreate] = useState({ typeCode: "", paymentMethodCode: "" });
 
-  const loadDonations = useCallback(async (activeFilters: Filters) => {
+  const loadDonations = useCallback(async (activeFilters: Filters, quickSearch = "") => {
     setLoading(true);
     setError("");
     try {
@@ -65,6 +68,7 @@ export function GeneralDonationArea() {
       Object.entries(activeFilters).forEach(([key, value]) => {
         if (value) query.set(key, value);
       });
+      if (quickSearch.trim()) query.set("q", quickSearch.trim());
       const response = await fetch(`/api/general-donations?${query.toString()}`, { cache: "no-store" });
       const data = (await response.json()) as { donations?: GeneralDonation[]; message?: string };
       if (!response.ok) throw new Error(data.message);
@@ -88,9 +92,15 @@ export function GeneralDonationArea() {
           setFormOpen(true);
         }
       }),
-      loadDonations(emptyFilters),
     ]).catch((reason) => setDefinitionsError(reason instanceof Error ? reason.message : "Form tanımları yüklenemedi."));
-  }, [loadDonations]);
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadDonations(applied, searchQuery);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [applied, loadDonations, searchQuery]);
 
   const byType = (type: string) => definitions.filter((item) => item.type === type);
 
@@ -102,7 +112,7 @@ export function GeneralDonationArea() {
       const response = await fetch(`/api/donations/${donation.id}`, { method: "DELETE" });
       const data = (await response.json()) as { message?: string };
       if (!response.ok) throw new Error(data.message ?? "Genel bağış silinemedi.");
-      await loadDonations(applied);
+      await loadDonations(applied, searchQuery);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Genel bağış silinemedi.");
     } finally {
@@ -112,13 +122,11 @@ export function GeneralDonationArea() {
 
   function applyFilters() {
     setApplied(filters);
-    void loadDonations(filters);
   }
 
   function clearFilters() {
     setFilters(emptyFilters);
     setApplied(emptyFilters);
-    void loadDonations(emptyFilters);
   }
 
   return (
@@ -137,8 +145,8 @@ export function GeneralDonationArea() {
       <Card className="mb-5 overflow-hidden">
         <div className="border-b border-slate-100 px-5 py-4"><h3 className="font-bold text-[#0b2b3c]">Sorgulama</h3></div>
         <div className="grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-4">
-          <FilterSelect label="Cinsi (Türü)" value={filters.typeId} onChange={(value) => setFilters((current) => ({ ...current, typeId: value }))} items={byType("DONATION_TYPE").filter((item) => item.code !== "KURBAN")} />
-          <FilterSelect label="Grubu" value={filters.groupId} onChange={(value) => setFilters((current) => ({ ...current, groupId: value }))} items={byType("GENERAL_DONATION_GROUP")} />
+          <FilterSelect label="Cinsi (Türü)" value={filters.typeId} onChange={(value) => setFilters((current) => ({ ...current, typeId: value, groupId: "" }))} items={byType("DONATION_TYPE").filter((item) => item.code !== "KURBAN")} />
+          <FilterSelect label="Grubu" value={filters.groupId} onChange={(value) => setFilters((current) => ({ ...current, groupId: value }))} items={byType("GENERAL_DONATION_GROUP").filter((item) => !filters.typeId || item.parentId === filters.typeId)} />
           <FilterSelect label="Gelen İl" value={filters.city} onChange={(value) => setFilters((current) => ({ ...current, city: value }))} items={byType("ORIGIN_CITY")} valueByName />
           <label><span className="mb-1.5 block text-[11px] font-semibold text-slate-600">Genel Durumu</span><select className={selectClass} value={filters.status} onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))}><option value="">Seçiniz</option><option value="STANDARD">Standart</option><option value="ORDERED">Sipariş</option></select></label>
           <label><span className="mb-1.5 block text-[11px] font-semibold text-slate-600">Yıl</span><select className={selectClass} value={filters.year} onChange={(event) => setFilters((current) => ({ ...current, year: event.target.value }))}><option value="">Seçiniz</option>{[2026, 2025, 2024].map((year) => <option key={year}>{year}</option>)}</select></label>
@@ -153,9 +161,22 @@ export function GeneralDonationArea() {
 
       {(error || definitionsError) && <p className="mb-4 rounded-xl bg-red-50 p-3 text-sm text-red-700">{error || definitionsError}</p>}
       <Card className="overflow-hidden">
-        <div className="border-b border-slate-100 px-5 py-4">
-          <h3 className="font-bold text-[#0b2b3c]">Genel Bağışçı Listesi</h3>
-          <p className="mt-1 text-xs text-slate-500">Filtrelere uyan genel bağış kayıtları</p>
+        <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="font-bold text-[#0b2b3c]">Genel Bağışçı Listesi</h3>
+            <p className="mt-1 text-xs text-slate-500">Filtrelere uyan genel bağış kayıtları</p>
+          </div>
+          <label className="relative block w-full sm:max-w-sm">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+            <input
+              type="search"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Ad, telefon veya makbuz no ara"
+              aria-label="Genel bağışçı listesinde ara"
+              className="h-10 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-emerald-500 focus:ring-4 focus:ring-emerald-50"
+            />
+          </label>
         </div>
         {loading ? (
           <div className="flex justify-center gap-2 p-12 text-sm text-slate-500"><LoaderCircle className="size-5 animate-spin" /> Kayıtlar yükleniyor</div>
@@ -163,12 +184,12 @@ export function GeneralDonationArea() {
           <div className="overflow-x-auto">
             <table className="w-full min-w-[1500px] text-left text-xs">
               <thead className="bg-[#02b3aa] text-white">
-                <tr>{["Seç", "Sil", "Tarih", "Adı", "Soyadı", "Telefon", "İl Adı", "Cinsi", "Grup", "Gel. Adet", "Ülke Adı", "Öd. Şekli", "Tutar", "Makbuz No"].map((item) => <th key={item} className="whitespace-nowrap px-4 py-3">{item}</th>)}</tr>
+                <tr>{["Güncelle", "Sil", "Tarih", "Adı", "Soyadı", "Telefon", "İl Adı", "Cinsi", "Grup", "Gel. Adet", "Ülke Adı", "Öd. Şekli", "Tutar", "Makbuz No"].map((item) => <th key={item} className="whitespace-nowrap px-4 py-3">{item}</th>)}</tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {donations.map((donation) => (
                   <tr key={donation.id} className="text-slate-700 hover:bg-emerald-50/40">
-                    <td className="px-4 py-3"><input type="checkbox" className="size-4 accent-emerald-600" aria-label={`${donation.firstName} ${donation.lastName} kaydını seç`} /></td>
+                    <td className="px-4 py-3"><button type="button" onClick={() => setEditingDonation(donation)} className="rounded-lg border border-amber-100 p-2 text-amber-600 hover:border-amber-300 hover:bg-amber-50" aria-label={`${donation.firstName} ${donation.lastName} kaydını güncelle`}><Pencil className="size-3.5" /></button></td>
                     <td className="px-4 py-3"><button type="button" onClick={() => void removeDonation(donation)} disabled={deletingId === donation.id} className="rounded-lg border border-red-100 p-2 text-red-600 hover:bg-red-50 disabled:opacity-50">{deletingId === donation.id ? <LoaderCircle className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}</button></td>
                     <td className="whitespace-nowrap px-4 py-3">{new Intl.DateTimeFormat("tr-TR").format(new Date(donation.date))}</td>
                     <td className="px-4 py-3 font-semibold">{donation.firstName}</td>
@@ -180,11 +201,11 @@ export function GeneralDonationArea() {
                     <td className="px-4 py-3 text-center font-semibold">{donation.quantity}</td>
                     <td className="px-4 py-3">{donation.country || "—"}</td>
                     <td className="px-4 py-3">{donation.paymentMethod || "—"}</td>
-                    <td className="px-4 py-3 font-bold text-[#0b2b3c]">{formatCurrency(donation.amount)}</td>
+                    <td className="px-4 py-3 font-bold text-[#0b2b3c]">{formatCurrency(donation.amount, donation.currencyCode)}</td>
                     <td className="whitespace-nowrap px-4 py-3">{donation.receiptNo || "—"}</td>
                   </tr>
                 ))}
-                {!donations.length && <tr><td colSpan={14} className="p-14 text-center text-sm text-slate-500">Sorguya uygun genel bağış kaydı bulunamadı.</td></tr>}
+                {!donations.length && <tr><td colSpan={14} className="p-14 text-center text-sm text-slate-500">{searchQuery.trim() ? "Aramanızla eşleşen genel bağış kaydı bulunamadı." : "Sorguya uygun genel bağış kaydı bulunamadı."}</td></tr>}
               </tbody>
             </table>
           </div>
@@ -201,12 +222,117 @@ export function GeneralDonationArea() {
           onClose={() => setFormOpen(false)}
           onSaved={async () => {
             setFormOpen(false);
-            await loadDonations(applied);
+            await loadDonations(applied, searchQuery);
+          }}
+        />
+      )}
+      {editingDonation && (
+        <GeneralDonationEditModal
+          donation={editingDonation}
+          definitions={definitions}
+          onClose={() => setEditingDonation(null)}
+          onSaved={async () => {
+            setEditingDonation(null);
+            await loadDonations(applied, searchQuery);
           }}
         />
       )}
     </div>
   );
+}
+
+function GeneralDonationEditModal({
+  donation,
+  definitions,
+  onClose,
+  onSaved,
+}: {
+  donation: GeneralDonation;
+  definitions: GeneralDonationDefinition[];
+  onClose: () => void;
+  onSaved: () => void | Promise<void>;
+}) {
+  const paymentMethods = definitions.filter((item) => item.type === "PAYMENT_METHOD");
+  const initialPayment = paymentMethods.find((item) => item.name === donation.paymentMethod)?.code ?? "";
+  const [form, setForm] = useState({
+    firstName: donation.firstName,
+    lastName: donation.lastName,
+    phone: donation.phone,
+    city: donation.city,
+    district: donation.district,
+    date: donation.date.slice(0, 10),
+    paymentMethod: initialPayment,
+    amount: String(donation.amount),
+    receiptNo: donation.receiptNo,
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  function update(field: keyof typeof form, value: string) {
+    setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/donations/${donation.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json; charset=utf-8" },
+        body: JSON.stringify({
+          firstName: form.firstName,
+          lastName: form.lastName,
+          phone: form.phone,
+          city: form.city || null,
+          district: form.district || null,
+          date: form.date,
+          paymentMethod: form.paymentMethod,
+          amount: Number(form.amount),
+          receiptNumber: form.receiptNo,
+          quantity: donation.quantity,
+        }),
+      });
+      const result = (await response.json()) as { message?: string };
+      if (!response.ok) throw new Error(result.message ?? "Genel bağış kaydı güncellenemedi.");
+      await onSaved();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Genel bağış kaydı güncellenemedi.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/60 p-3 backdrop-blur-[2px] sm:p-5">
+      <form onSubmit={submit} className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white shadow-2xl shadow-slate-950/30">
+        <div className="relative bg-[#126653] px-5 py-4 text-center text-white">
+          <h3 className="font-bold uppercase tracking-wide">Genel Bağış Kaydını Güncelle</h3>
+          <button type="button" onClick={onClose} className="absolute right-4 top-1/2 -translate-y-1/2 rounded-lg p-2 hover:bg-white/15" aria-label="Kapat"><X className="size-5" /></button>
+        </div>
+        <div className="grid gap-4 p-5 sm:grid-cols-2 sm:p-6">
+          <EditField label="Adı"><input required value={form.firstName} onChange={(event) => update("firstName", event.target.value)} className={selectClass} /></EditField>
+          <EditField label="Soyadı"><input required value={form.lastName} onChange={(event) => update("lastName", event.target.value)} className={selectClass} /></EditField>
+          <EditField label="Telefon"><input required value={form.phone} onChange={(event) => update("phone", event.target.value)} className={selectClass} /></EditField>
+          <EditField label="Tarih"><input required type="date" value={form.date} onChange={(event) => update("date", event.target.value)} className={selectClass} /></EditField>
+          <EditField label="İl"><input value={form.city} onChange={(event) => update("city", event.target.value)} className={selectClass} /></EditField>
+          <EditField label="İlçe"><input value={form.district} onChange={(event) => update("district", event.target.value)} className={selectClass} /></EditField>
+          <EditField label="Ödeme Şekli"><select required value={form.paymentMethod} onChange={(event) => update("paymentMethod", event.target.value)} className={selectClass}><option value="">Seçiniz</option>{paymentMethods.map((item) => <option key={item.id} value={item.code}>{item.name}</option>)}</select></EditField>
+          <EditField label="Tutar"><input required type="number" min="0.01" step="0.01" value={form.amount} onChange={(event) => update("amount", event.target.value)} className={selectClass} /></EditField>
+          <EditField label="Makbuz No"><input required value={form.receiptNo} onChange={(event) => update("receiptNo", event.target.value)} className={selectClass} /></EditField>
+        </div>
+        {error && <p className="mx-5 mb-4 rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</p>}
+        <div className="flex justify-end gap-2 border-t bg-slate-50 px-5 py-4">
+          <Button type="button" variant="ghost" onClick={onClose}>İptal</Button>
+          <Button type="submit" variant="success" disabled={saving}>{saving ? <LoaderCircle className="size-4 animate-spin" /> : <Save className="size-4" />} Güncelle</Button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function EditField({ label, children }: { label: string; children: React.ReactNode }) {
+  return <label><span className="mb-1.5 block text-[11px] font-semibold text-slate-600">{label}</span>{children}</label>;
 }
 
 function FilterSelect({

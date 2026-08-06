@@ -63,6 +63,7 @@ export type SacrificeDonationEditData = {
   lastName: string;
   phone: string;
   phoneCountry: string;
+  originCountry: string;
   city: string;
   district: string;
   date: string;
@@ -73,6 +74,7 @@ export type SacrificeDonationEditData = {
   amount: number;
   description: string;
   quantity: number;
+  receiptNo: string;
 };
 
 const fieldClass =
@@ -96,6 +98,7 @@ export function SacrificeDonationForm({
   const [sacrificeId, setSacrificeId] = useState(editData?.projectId ?? "");
   const [quantity, setQuantity] = useState(editData?.quantity ?? 1);
   const [amount, setAmount] = useState(editData ? String(editData.amount) : "");
+  const [receiptNo, setReceiptNo] = useState(editData?.receiptNo ?? "");
   const [paymentMethod, setPaymentMethod] = useState(editData?.paymentMethod ?? "CASH");
   const [sendWhatsapp, setSendWhatsapp] = useState(true);
   const [sendToProxy, setSendToProxy] = useState(false);
@@ -187,7 +190,8 @@ export function SacrificeDonationForm({
   const availablePartners = formDefinitions.filter(
     (item) =>
       item.type === "PARTNER" &&
-      (!selectedCountryDefinition || !item.parentId || item.parentId === selectedCountryDefinition.id),
+      Boolean(selectedCountryDefinition) &&
+      item.parentId === selectedCountryDefinition?.id,
   );
   const originStates = useMemo(() => {
     const country = locationDefinitions.find((item) => item.type === "ORIGIN_COUNTRY" && item.code === phoneCountry);
@@ -298,6 +302,10 @@ export function SacrificeDonationForm({
       setError("Ödeme tutarı sıfırdan büyük olmalıdır.");
       return;
     }
+    if (!receiptNo.trim()) {
+      setError("Makbuz numarası zorunludur.");
+      return;
+    }
     setSaving(true);
     setError("");
     setSuccess("");
@@ -319,8 +327,16 @@ export function SacrificeDonationForm({
           body: JSON.stringify({
             firstName: String(values.get("firstName") ?? ""),
             lastName: String(values.get("lastName") ?? ""),
+            phone: String(values.get("phone") ?? ""),
+            phoneCountry,
+            originCountry: String(values.get("originCountry") ?? "") || null,
             city: String(values.get("originCity") ?? "") || null,
             district: String(values.get("originDistrict") ?? "") || null,
+            amount: numericAmount,
+            paymentMethod,
+            sacrificeId: selected.id,
+            quantity,
+            receiptNumber: receiptNo.trim(),
             date: values.get("date"),
             description: String(values.get("description") ?? ""),
           }),
@@ -354,6 +370,7 @@ export function SacrificeDonationForm({
               foreignAmount: null,
               currencyId: selected.currencyId,
               paymentMethodId: paymentDefinition.id,
+              receiptNumber: quantity === 1 ? receiptNo.trim() : `${receiptNo.trim()}-${index + 1}`,
               receiptDate: values.get("date"),
               description: details,
               messageTarget: sendToProxy ? "CLOSE" : "DONOR",
@@ -376,6 +393,7 @@ export function SacrificeDonationForm({
       setSendToProxy(false);
       setSendCurrencySms(false);
       setPhoneNumber("");
+      setReceiptNo("");
       setProxyPhone("");
       setOriginStateCode("");
       setOriginCityName("");
@@ -580,7 +598,7 @@ export function SacrificeDonationForm({
                 <Field label="Birim"><Select value="TRY" onChange={() => undefined}><option value="TRY">TL</option></Select></Field>
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <Field label="Makbuz No"><Input value="Otomatik" readOnly className="h-11 bg-slate-50" /></Field>
+                <Field label="Makbuz No" required><Input value={receiptNo} onChange={(event) => setReceiptNo(event.target.value)} required placeholder="Makbuz numarasını girin" className="h-11" /></Field>
                 <Field label="Tarih"><Input name="date" type="date" defaultValue={editData?.date ? editData.date.slice(0, 10) : new Date().toISOString().slice(0, 10)} className="h-11" /></Field>
               </div>
               <Field label="Açıklama"><textarea name="description" defaultValue={editData?.description} className={`${fieldClass} min-h-24 resize-none py-3`} placeholder="Bağışa ilişkin açıklama..." /></Field>
